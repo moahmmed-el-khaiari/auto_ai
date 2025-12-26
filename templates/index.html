@@ -1,0 +1,265 @@
+<!doctype html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>AutoTurbo IA — Local AI</title>
+
+  <style>
+    :root{
+      --bg0:#070A12;
+      --bg1:#0B1220;
+      --card:#0D1628CC;
+      --stroke:#22304A;
+      --text:#E6EDF7;
+      --muted:#9FB0C7;
+      --ai:#A7F3D0;
+      --me:#93C5FD;
+      --accent:#7C3AED;
+      --accent2:#22C55E;
+      --danger:#EF4444;
+      --shadow: 0 18px 55px rgba(0,0,0,.55);
+    }
+
+    *{box-sizing:border-box}
+    html,body{height:100%}
+    body{
+      margin:0;
+      font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial;
+      color:var(--text);
+      background:
+        radial-gradient(1200px 700px at 20% 10%, rgba(124,58,237,.35), transparent 60%),
+        radial-gradient(1000px 600px at 85% 35%, rgba(34,197,94,.18), transparent 55%),
+        linear-gradient(180deg, var(--bg0), var(--bg1));
+      overflow:hidden;
+    }
+
+    .wrap{
+      max-width: 1000px;
+      margin:0 auto;
+      height:100%;
+      display:flex;
+      align-items:center;
+      justify-content:center;
+      padding:20px;
+    }
+
+    .card{
+      width:100%;
+      height:min(90vh, 720px);
+      background: var(--card);
+      border: 1px solid rgba(255,255,255,.08);
+      border-radius: 22px;
+      box-shadow: var(--shadow);
+      backdrop-filter: blur(14px);
+      display:flex;
+      flex-direction:column;
+      overflow:hidden;
+    }
+
+    /* HEADER */
+    .header{
+      display:flex;
+      align-items:center;
+      justify-content:space-between;
+      padding:16px 18px;
+      border-bottom:1px solid rgba(255,255,255,.08);
+    }
+
+    .brand{
+      display:flex;
+      gap:12px;
+      align-items:center;
+    }
+
+    .logo{
+      width:38px;height:38px;
+      border-radius:14px;
+      background:linear-gradient(135deg,var(--accent),var(--accent2));
+      display:grid;
+      place-items:center;
+      font-weight:800;
+    }
+
+    .title b{font-size:16px}
+    .title span{font-size:12px;color:var(--muted)}
+
+    .actions{
+      display:flex;
+      gap:10px;
+    }
+
+    .btn{
+      padding:10px 14px;
+      border-radius:14px;
+      border:1px solid rgba(255,255,255,.12);
+      background:rgba(0,0,0,.25);
+      color:var(--text);
+      cursor:pointer;
+    }
+
+    .btn.primary{
+      background:linear-gradient(135deg,var(--accent),#3B82F6);
+    }
+
+    .btn.danger{
+      background:rgba(239,68,68,.18);
+      border-color:rgba(239,68,68,.4);
+    }
+
+    /* CHAT */
+    .chat{
+      flex:1;
+      padding:18px;
+      overflow:auto;
+    }
+
+    .msg{
+      display:flex;
+      margin-bottom:12px;
+    }
+
+    .msg.me{justify-content:flex-end}
+
+    .bubble{
+      max-width:78%;
+      padding:12px 14px;
+      border-radius:16px;
+      border:1px solid rgba(255,255,255,.12);
+      background:rgba(0,0,0,.25);
+      white-space:pre-wrap;
+    }
+
+    .msg.ai .bubble{
+      background:linear-gradient(180deg,rgba(167,243,208,.12),rgba(0,0,0,.25));
+      border-top-left-radius:8px;
+    }
+
+    .msg.me .bubble{
+      background:linear-gradient(180deg,rgba(147,197,253,.15),rgba(0,0,0,.25));
+      border-top-right-radius:8px;
+    }
+
+    /* COMPOSER */
+    .composer{
+      display:flex;
+      gap:12px;
+      padding:14px 18px;
+      border-top:1px solid rgba(255,255,255,.08);
+    }
+
+    .composer input{
+      flex:1;
+      padding:12px;
+      border-radius:14px;
+      border:1px solid rgba(255,255,255,.12);
+      background:rgba(0,0,0,.25);
+      color:var(--text);
+      outline:none;
+    }
+
+    .status{
+      font-size:12px;
+      color:var(--muted);
+      align-self:center;
+    }
+  </style>
+</head>
+
+<body>
+<div class="wrap">
+  <div class="card">
+
+    <!-- HEADER -->
+    <div class="header">
+      <div class="brand">
+        <div class="logo">AI</div>
+        <div class="title">
+          <b>AutoTurbo IA</b>
+          <span>Assistant pièces auto • Localhost</span>
+        </div>
+      </div>
+      <div class="actions">
+        <button class="btn danger" id="reset">Reset</button>
+        <button class="btn primary" id="send">Envoyer</button>
+      </div>
+    </div>
+
+    <!-- CHAT -->
+    <div id="chat" class="chat">
+      <div class="msg ai">
+        <div class="bubble">
+          Bonjour 👋 Je suis AutoTurbo, votre assistant spécialisé en pièces auto.
+        </div>
+      </div>
+      <div class="msg ai">
+        <div class="bubble">
+          Indiquez la pièce, la marque, le modèle et l’année.
+        </div>
+      </div>
+    </div>
+
+    <!-- INPUT -->
+    <div class="composer">
+      <input id="text" placeholder="Ex: turbo Renault Clio 4 2017" />
+      <div class="status" id="status">Prêt</div>
+    </div>
+
+  </div>
+</div>
+
+<script>
+  const chat = document.getElementById("chat");
+  const text = document.getElementById("text");
+  const send = document.getElementById("send");
+  const reset = document.getElementById("reset");
+  const statusEl = document.getElementById("status");
+
+  function addMsg(who, content){
+    const wrap = document.createElement("div");
+    wrap.className = "msg " + who;
+    const bubble = document.createElement("div");
+    bubble.className = "bubble";
+    bubble.textContent = content;
+    wrap.appendChild(bubble);
+    chat.appendChild(wrap);
+    chat.scrollTop = chat.scrollHeight;
+    return bubble;
+  }
+
+  async function sendMsg(){
+    const value = text.value.trim();
+    if(!value) return;
+    text.value = "";
+
+    addMsg("me","Client > " + value);
+    statusEl.textContent = "Génération...";
+    const pending = addMsg("ai","IA > ...");
+
+    try{
+      const res = await fetch("/chat",{
+        method:"POST",
+        headers:{"Content-Type":"application/json"},
+        body:JSON.stringify({text:value})
+      });
+      const data = await res.json();
+      pending.textContent = "IA > " + (data.answer || "(aucune réponse)");
+    }catch(e){
+      pending.textContent = "IA > Erreur serveur (Flask / Ollama).";
+    }finally{
+      statusEl.textContent = "Prêt";
+    }
+  }
+
+  async function doReset(){
+    await fetch("/reset",{method:"POST"});
+    addMsg("ai","IA > ✅ Mémoire réinitialisée. Nouvelle demande.");
+  }
+
+  send.onclick = sendMsg;
+  reset.onclick = doReset;
+  text.addEventListener("keydown",e=>{if(e.key==="Enter")sendMsg()});
+</script>
+
+</body>
+</html>
