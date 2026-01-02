@@ -1,5 +1,5 @@
 from flask import Flask, render_template, request, jsonify, session
-
+from flask import redirect
 from assistant_slots import new_slots, process_message
 
 app = Flask(__name__)
@@ -27,6 +27,9 @@ def chat():
 
     return jsonify({"answer": answer})
 
+@app.get("/checkout/<lead_id>")
+def checkout(lead_id):
+    return render_template("checkout.html", lead_id=lead_id)
 
 @app.post("/reset")
 def reset():

@@ -1,0 +1,57 @@
+<!doctype html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>AutoTurbo — Suivi / Paiement</title>
+  <style>
+    body{font-family:system-ui,Arial;background:#0b1220;color:#eaf0ff;margin:0}
+    .wrap{max-width:900px;margin:0 auto;padding:24px}
+    .card{background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.12);border-radius:18px;padding:18px}
+    .grid{display:grid;grid-template-columns:1fr 1fr;gap:14px}
+    .btn{display:inline-block;padding:12px 14px;border-radius:12px;border:1px solid rgba(255,255,255,.18);color:#eaf0ff;text-decoration:none}
+    .btn:hover{background:rgba(255,255,255,.08)}
+    .muted{opacity:.75}
+    input,select{width:100%;padding:12px;border-radius:12px;border:1px solid rgba(255,255,255,.18);background:rgba(0,0,0,.2);color:#eaf0ff}
+    .line{height:1px;background:rgba(255,255,255,.12);margin:14px 0}
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <h1>AutoTurbo — Suivi / Paiement</h1>
+    <p class="muted">Référence demande : <b>{{ lead_id }}</b></p>
+
+    <div class="grid">
+      <div class="card">
+        <h3>Option 1 — Paiement (démo)</h3>
+        <p class="muted">Choisissez un mode (simulation) :</p>
+        <form>
+          <label>Mode de paiement</label>
+          <select>
+            <option>Carte bancaire</option>
+            <option>PayPal</option>
+            <option>Cash à la livraison</option>
+          </select>
+          <div class="line"></div>
+          <label>Nom</label>
+          <input placeholder="Votre nom" />
+          <div class="line"></div>
+          <a class="btn" href="#">Continuer (démo)</a>
+        </form>
+      </div>
+
+      <div class="card">
+        <h3>Option 2 — Appel vendeur</h3>
+        <p class="muted">Cliquez pour appeler un vendeur :</p>
+        <a class="btn" href="tel:+212600000000">📞 Appeler le vendeur</a>
+        <div class="line"></div>
+        <p class="muted">Ou WhatsApp :</p>
+        <a class="btn" href="https://wa.me/212600000000" target="_blank">💬 WhatsApp</a>
+      </div>
+    </div>
+
+    <div class="line"></div>
+    <a class="btn" href="/">⬅ Retour au chat</a>
+  </div>
+</body>
+</html>

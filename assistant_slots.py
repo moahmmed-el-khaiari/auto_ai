@@ -1,30 +1,29 @@
-# assistant_slots.py
 import re
 from typing import Dict, Optional
 
 import ollama
 from pieces import rechercher_piece
+from order import save_lead
 
 MODEL = "deepseek-r1:7b"
 
 SYSTEM = """
-Tu es un assistant professionnel de magasin de pièces auto.
+Tu es AutoTurbo, assistant professionnel de magasin de pièces auto.
 Tu réponds TOUJOURS en français.
-IMPORTANT :
-- Réponds UNIQUEMENT par la phrase finale à dire au client.
-- AUCUNE explication.
-- AUCUN raisonnement.
-- UNE seule phrase courte (max 20 mots).
-- Ton poli et professionnel.
+Règles STRICTES :
+- 1 seule phrase courte (max 14 mots).
+- Pas d’explication, pas de raisonnement, pas de guillemets.
+- Ton poli, direct, style vendeur pro.
+- Si l'utilisateur n’a pas l’info : accepte et passe à l’étape suivante.
+- Tes questions doivent être claires et orientées action.
 """
 
-# -----------------------------
-# CONFIG
-# -----------------------------
 GREETINGS = {"salut", "bonjour", "bonsoir", "hello", "salam", "hi"}
+RESET_WORDS = {"reset", "recommencer", "nouvelle demande", "vider"}
+
 NO_INFO_WORDS = {
-    "je ne l ai pas", "je ne l'ai pas", "non", "pas disponible",
-    "aucune", "je sais pas", "je ne sais pas", "nn", "nop", "j ai pas", "jai pas"
+    "je ne l ai pas", "je ne l'ai pas", "non", "aucune", "pas disponible",
+    "je sais pas", "je ne sais pas", "nn", "nop", "j ai pas", "jai pas"
 }
 
 PIECES_KNOWN = {
@@ -38,12 +37,23 @@ PIECES_KNOWN = {
 
 TYPE_WORDS = ["neuf", "occasion", "original", "adaptable", "avant", "arrière", "arriere"]
 
-# -----------------------------
-# SLOTS
-# -----------------------------
-def new_slots() -> Dict[str, Optional[str]]:
+FLOW = [
+    ("motif", "Demande le motif : commande, suivi de commande, ou SAV."),
+    ("immat", "Demande l’immatriculation du véhicule, ou accepte “je ne l’ai pas”."),
+    ("chassis", "Demande le numéro de châssis (VIN), ou accepte “je ne l’ai pas”."),
+    ("piece", "Demande la pièce recherchée (ex: turbo, filtre huile, plaquettes frein)."),
+    ("type_piece", "Demande le type de pièce (neuf/original/occasion/avant/arrière) ou accepte “je ne sais pas”."),
+    ("marque", "Demande la marque du véhicule."),
+    ("modele", "Demande le modèle du véhicule."),
+    ("annee", "Demande l’année du véhicule."),
+    ("coordonnees", "Demande téléphone ou email pour rappel et suivi."),
+]
+
+def new_slots() -> Dict[str, Optional[str | int | bool]]:
     return {
         "_step": 0,
+        "_lead_saved": False,
+        "_lead_id": None,
         "motif": None,
         "immat": None,
         "chassis": None,
@@ -55,44 +65,61 @@ def new_slots() -> Dict[str, Optional[str]]:
         "coordonnees": None,
     }
 
-# -----------------------------
-# OLLAMA (anti vide + retry)
-# -----------------------------
-def _clean_text(s: str) -> str:
+# ---------- OLLAMA (100% réponses) ----------
+def _clean_one_sentence(s: str) -> str:
     s = (s or "").strip()
-
-    # supprime préfixes courants
     s = re.sub(r"^question\s*:\s*", "", s, flags=re.I)
     s = re.sub(r"^réponse\s*:\s*", "", s, flags=re.I)
-
-    # enlève guillemets et espaces
     s = s.strip().strip("“”\"' ")
 
-    # prend la meilleure ligne "courte"
+    # garde la dernière ligne non vide
     lines = [l.strip() for l in s.splitlines() if l.strip()]
-    for l in reversed(lines):
-        l = l.strip("“”\"' ")
-        # évite les phrases en anglais de reasoning
-        if "okay" in l.lower() or "i need" in l.lower():
-            continue
-        if 3 <= len(l) <= 220:
-            return l
+    if not lines:
+        return ""
 
-    return ""
+    out = lines[-1].strip().strip("“”\"' ")
+    # coupe si trop long
+    if len(out) > 160:
+        out = out[:160].rsplit(" ", 1)[0]
+    return out
 
-def llm_say(instruction: str, fallback: str) -> str:
+import time
+
+def llm_say(instruction: str, slots: dict) -> str:
     """
-    Appelle Ollama et garantit une sortie non vide.
-    fallback = phrase brute si le modèle renvoie vide.
+    100% Ollama si possible.
+    Si Ollama ne répond pas (erreur / vide / timeout), on renvoie un message FIXE (pas Ollama).
     """
+    ctx = {
+        "step": slots.get("_step"),
+        "motif": slots.get("motif"),
+        "immat": slots.get("immat"),
+        "chassis": slots.get("chassis"),
+        "piece": slots.get("piece"),
+        "type_piece": slots.get("type_piece"),
+        "marque": slots.get("marque"),
+        "modele": slots.get("modele"),
+        "annee": slots.get("annee"),
+        "coordonnees": slots.get("coordonnees"),
+    }
+
     prompt = (
-        "Réponds par UNE seule phrase courte en français (max 20 mots).\n"
-        "Sans explication, sans raisonnement.\n"
-        f"{instruction}"
+        "Réponds avec UNE seule phrase (max 14 mots), style vendeur pro.\n"
+        "Aucune explication.\n"
+        f"Contexte: {ctx}\n"
+        f"Instruction: {instruction}"
     )
 
-    # 2 tentatives
-    for _ in range(2):
+    fallback_fixed = "Désolé, service IA indisponible. Réessayez dans un instant."
+
+    start = time.time()
+    timeout_sec = 6  # ✅ tu peux mettre 4..10
+
+    while True:
+        # ✅ Timeout global
+        if time.time() - start > timeout_sec:
+            return fallback_fixed
+
         try:
             resp = ollama.chat(
                 model=MODEL,
@@ -102,8 +129,7 @@ def llm_say(instruction: str, fallback: str) -> str:
                 ],
                 options={
                     "temperature": 0.1,
-                    "num_predict": 80,
-                    # ⚠️ IMPORTANT: ne pas mettre "\n\n" ici
+                    "num_predict": 60,
                     "stop": ["Okay", "I need", "Reason", "Réflexion", "Thinking:"],
                 },
             )
@@ -112,194 +138,160 @@ def llm_say(instruction: str, fallback: str) -> str:
             content = (msg.get("content") or "").strip()
             thinking = (msg.get("thinking") or "").strip()
 
-            out = _clean_text(content) or _clean_text(thinking)
+            out = _clean_one_sentence(content) or _clean_one_sentence(thinking)
+
+            # ✅ si vide => retente jusqu’au timeout
             if out:
                 return out
+
         except Exception:
-            pass
+            # ✅ si erreur => retente jusqu’au timeout
+            continue
 
-    # si toujours vide => fallback
-    return fallback
 
-# -----------------------------
-# EXTRACTIONS
-# -----------------------------
-def extract_immat(text: str):
-    m = re.search(r"\b\d{1,4}[-\s]?[A-Z][- \s]?\d{1,3}\b", text.upper())
-    return m.group(0) if m else None
-
-def extract_vin(text: str):
-    m = re.search(r"\b[A-HJ-NPR-Z0-9]{17}\b", text.upper())
-    return m.group(0) if m else None
-
-def extract_year(text: str):
+# ---------- Extract / update ----------
+def extract_year(text: str) -> Optional[int]:
     m = re.search(r"\b(19\d{2}|20\d{2})\b", text)
-    if m:
-        y = int(m.group(1))
-        return y if 1980 <= y <= 2030 else None
-    return None
+    if not m:
+        return None
+    y = int(m.group(1))
+    return y if 1980 <= y <= 2030 else None
 
-def extract_contact(text: str):
-    tel = re.search(r"\b0\d{9}\b", text)
-    email = re.search(r"[\w\.-]+@[\w\.-]+\.\w+", text)
-    if tel or email:
-        return f"Téléphone: {tel.group(0) if tel else '—'} | Email: {email.group(0) if email else '—'}"
-    return None
-
-def extract_piece(text: str):
+def extract_piece(text: str) -> Optional[str]:
     t = text.lower()
     for k, v in PIECES_KNOWN.items():
         if k in t:
             return v
     return None
 
-def extract_type_piece(text: str):
+def extract_type_piece(text: str) -> Optional[str]:
     t = text.lower()
-    return text if any(w in t for w in TYPE_WORDS) else None
+    return text.strip() if any(w in t for w in TYPE_WORDS) else None
 
-# -----------------------------
-# FLOW (avec pointeur _step)
-# -----------------------------
-FLOW = [
-    ("motif", "Commande, suivi de commande, ou SAV ?"),
-    ("immat", "Avez-vous l’immatriculation du véhicule ?"),
-    ("chassis", "Avez-vous le numéro de châssis (VIN) ?"),
-    ("piece", "De quelle pièce avez-vous besoin ?"),
-    ("type_piece", "Quel type de pièce souhaitez-vous ? (neuf/original/occasion/avant/arrière)"),
-    ("marque", "Quelle est la marque du véhicule ?"),
-    ("modele", "Quel est le modèle du véhicule ?"),
-    ("annee", "Quelle est l’année du véhicule ?"),
-    ("coordonnees", "Pouvez-vous me donner votre téléphone ou email ?"),
-]
+def extract_contact(text: str) -> Optional[str]:
+    tel = re.search(r"\b0\d{9}\b", text)
+    email = re.search(r"[\w\.-]+@[\w\.-]+\.\w+", text)
+    if tel or email:
+        return text.strip()
+    return None
 
-def next_question(slots):
+def next_key(slots: dict) -> Optional[str]:
     step = int(slots.get("_step", 0) or 0)
-    step = max(0, step)
+    if step < 0:
+        step = 0
     if step >= len(FLOW):
         return None
-    return FLOW[step][1]
+    return FLOW[step][0]
 
-# -----------------------------
-# UPDATE SLOTS (par étape)
-# -----------------------------
-def update_slots(slots, text):
-    raw = text.strip()
+def update_slots(slots: dict, raw_text: str) -> None:
+    raw = raw_text.strip()
     t = raw.lower()
     step = int(slots.get("_step", 0) or 0)
-    step = max(0, step)
+    key = next_key(slots)
 
-    if step == 0:
+    if key == "motif":
         if "commande" in t:
-            slots["motif"] = "commande"; slots["_step"] = 1
+            slots["motif"] = "commande"; slots["_step"] += 1
         elif "suivi" in t:
-            slots["motif"] = "suivi"; slots["_step"] = 1
+            slots["motif"] = "suivi"; slots["_step"] += 1
         elif "sav" in t:
-            slots["motif"] = "sav"; slots["_step"] = 1
+            slots["motif"] = "sav"; slots["_step"] += 1
         return
 
-    if step == 1:
-        if t in NO_INFO_WORDS:
-            slots["immat"] = "UNKNOWN"; slots["_step"] = 2; return
-        imm = extract_immat(raw)
-        if imm:
-            slots["immat"] = imm; slots["_step"] = 2
+    if key == "immat":
+        slots["immat"] = "UNKNOWN" if t in NO_INFO_WORDS else raw
+        slots["_step"] += 1
         return
 
-    if step == 2:
-        if t in NO_INFO_WORDS:
-            slots["chassis"] = "UNKNOWN"; slots["_step"] = 3; return
-        vin = extract_vin(raw)
-        if vin:
-            slots["chassis"] = vin; slots["_step"] = 3
+    if key == "chassis":
+        slots["chassis"] = "UNKNOWN" if t in NO_INFO_WORDS else raw
+        slots["_step"] += 1
         return
 
-    if step == 3:
+    if key == "piece":
         p = extract_piece(raw)
         if p:
-            slots["piece"] = p; slots["_step"] = 4
+            slots["piece"] = p; slots["_step"] += 1
         return
 
-    if step == 4:
+    if key == "type_piece":
         if t in NO_INFO_WORDS:
-            slots["type_piece"] = "UNKNOWN"; slots["_step"] = 5; return
+            slots["type_piece"] = "UNKNOWN"; slots["_step"] += 1
+            return
         tp = extract_type_piece(raw)
         if tp:
-            slots["type_piece"] = tp; slots["_step"] = 5
+            slots["type_piece"] = tp; slots["_step"] += 1
         return
 
-    if step == 5:
-        if len(raw.split()) <= 2 and raw[:1].isalpha():
-            slots["marque"] = raw.title(); slots["_step"] = 6
+    if key == "marque":
+        if len(raw.split()) <= 2:
+            slots["marque"] = raw.title(); slots["_step"] += 1
         return
 
-    if step == 6:
-        if any(c.isalpha() for c in raw) and any(c.isdigit() for c in raw):
-            slots["modele"] = raw; slots["_step"] = 7
+    if key == "modele":
+        if any(c.isdigit() for c in raw):
+            slots["modele"] = raw; slots["_step"] += 1
         return
 
-    if step == 7:
+    if key == "annee":
         y = extract_year(raw)
         if y:
-            slots["annee"] = y; slots["_step"] = 8
+            slots["annee"] = y; slots["_step"] += 1
         return
 
-    if step == 8:
+    if key == "coordonnees":
         c = extract_contact(raw)
         if c:
-            slots["coordonnees"] = c; slots["_step"] = 9
+            slots["coordonnees"] = c; slots["_step"] += 1
         return
 
-# -----------------------------
-# FINAL ANSWER
-# -----------------------------
-def final_answer(slots):
+def is_complete(slots: dict) -> bool:
+    required = ["motif", "piece", "marque", "modele", "annee", "coordonnees"]
+    return all(slots.get(k) not in (None, "") for k in required)
+
+def finish_url(lead_id: str) -> str:
+    return f"http://127.0.0.1:5000/checkout/{lead_id}"
+
+def final_stock_sentence(slots: dict) -> str:
     row = rechercher_piece(slots["piece"], slots["marque"], slots["modele"], slots["annee"])
     if not row:
-        return "La pièce n’est pas disponible, voulez-vous une alternative ou une vérification vendeur ?"
+        return "Annonce l’indisponibilité et propose un appel vendeur."
+    return "Annonce dispo + prix + stock, très court."
 
-    return (
-        f"Pièce {row['piece']} disponible pour {row['marque']} {row['modele']} {row['annee']}, "
-        f"prix {row['prix']} DH, stock {row['stock']} unités."
-    )
-
-# -----------------------------
-# API
-# -----------------------------
-def process_message(text, slots):
+def process_message(text: str, slots: dict):
     raw = (text or "").strip()
-    if not raw:
-        return "Écrivez votre demande, s’il vous plaît.", slots
-
-    # sécurité: si session ancienne
-    if "_step" not in slots:
+    if not isinstance(slots, dict) or "_step" not in slots:
         slots = new_slots()
 
     t = raw.lower()
 
-    # reset
-    if t in {"reset", "recommencer", "nouvelle demande"}:
+    # RESET (100% Ollama)
+    if t in RESET_WORDS:
         slots = new_slots()
-        msg = llm_say("Dis: Mémoire réinitialisée. Commande, suivi de commande, ou SAV ?", "✅ Mémoire réinitialisée. Commande, suivi de commande, ou SAV ?")
-        return msg, slots
+        return llm_say("Confirme la réinitialisation et demande le motif.", slots), slots
 
-    # salut
+    # GREETING (100% Ollama)
     if t in GREETINGS:
-        msg = llm_say(
-            "Présente-toi brièvement et demande: commande, suivi de commande, ou SAV ?",
-            "Bonjour 👋 Commande, suivi de commande, ou SAV ?"
-        )
-        return msg, slots
+        return llm_say("Salue brièvement et demande le motif.", slots), slots
 
-    # update
+    # Update
     update_slots(slots, raw)
 
-    # question suivante
-    q = next_question(slots)
-    if q:
-        msg = llm_say(q, q)
-        return msg, slots
+    # Next question (100% Ollama)
+    key = next_key(slots)
+    if key is not None:
+        instr = dict(FLOW).get(key, "Pose la prochaine question.")
+        return llm_say(instr, slots), slots
 
-    # réponse finale
-    base = final_answer(slots)
-    msg = llm_say(base, base)
-    return msg, slots
+    # Complete => save lead then give link (100% Ollama)
+    if is_complete(slots):
+        if not slots.get("_lead_saved"):
+            lead_id = save_lead(slots)
+            slots["_lead_saved"] = True
+            slots["_lead_id"] = str(lead_id)
+
+        url = finish_url(slots["_lead_id"])
+        return llm_say(f"Confirme l’enregistrement et donne ce lien: {url}", slots), slots
+
+    # Stock response (100% Ollama)
+    return llm_say(final_stock_sentence(slots), slots), slots

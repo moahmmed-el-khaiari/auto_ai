@@ -216,16 +216,26 @@
   const statusEl = document.getElementById("status");
 
   function addMsg(who, content){
-    const wrap = document.createElement("div");
-    wrap.className = "msg " + who;
-    const bubble = document.createElement("div");
-    bubble.className = "bubble";
+  const wrap = document.createElement("div");
+  wrap.className = "msg " + who;
+  const bubble = document.createElement("div");
+  bubble.className = "bubble";
+
+  if (who === "ai") {
+    bubble.innerHTML = content.replace(
+      /(http:\/\/[^\s]+)/g,
+      '<a href="$1" target="_blank" style="color:#22C55E">$1</a>'
+    );
+  } else {
     bubble.textContent = content;
-    wrap.appendChild(bubble);
-    chat.appendChild(wrap);
-    chat.scrollTop = chat.scrollHeight;
-    return bubble;
   }
+
+  wrap.appendChild(bubble);
+  chat.appendChild(wrap);
+  chat.scrollTop = chat.scrollHeight;
+  return bubble;
+}
+
 
   async function sendMsg(){
     const value = text.value.trim();

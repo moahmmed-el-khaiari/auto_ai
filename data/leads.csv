@@ -1,0 +1,5 @@
+lead_id,created_at,motif,immat,chassis,piece,type_piece,marque,modele,annee,coordonnees,status
+566a8ba48f,2025-12-30T17:56:30,commande,UNKNOWN,UNKNOWN,turbo,original,Renault,Clio 4,2017,Téléphone: 0706116931 | Email: —,NEW
+beb7c2e772,2025-12-30T18:08:42,commande,UNKNOWN,UNKNOWN,turbo,occasion,Renault,Clio 4,2017,Téléphone: 0612345678 | Email: —,NEW
+15b600856d,2025-12-30T18:25:23,commande,UNKNOWN,UNKNOWN,turbo,neuf,Renault,Clio 4,2017,Téléphone: 0687654321 | Email: —,NEW
+62e856a217,2025-12-30T18:35:24,commande,UNKNOWN,UNKNOWN,turbo,original,Renault,Clio 4,2017,Téléphone: 0612121212 | Email: —,NEW
